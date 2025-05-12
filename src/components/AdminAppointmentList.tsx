@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Appointment } from '../domain/appointment';
 import { format, isAfter, isBefore, startOfDay, endOfDay, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { Calendar, Clock, FileText, Check, X, Filter, Mail, User } from 'lucide-react';
 import { AppointmentService } from '../services/appointmentService';
 
@@ -13,6 +14,7 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<string>('upcoming');
   const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -27,13 +29,35 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
     }
   };
 
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'confirmed':
+        return 'Confirmada';
+      case 'cancelled':
+        return 'Cancelada';
+      case 'completed':
+        return 'Completada';
+      default:
+        return 'Pendiente';
+    }
+  };
+
   const handleStatusUpdate = async (id: string, status: 'confirmed' | 'cancelled' | 'completed') => {
+    console.log('Intentando actualizar cita:', { id, status });
     setLoading(id);
+    setError(null);
     try {
       await AppointmentService.updateAppointmentStatus(id, status);
+      console.log('Cita actualizada exitosamente:', { id, status });
       onStatusUpdate();
-    } catch (error) {
-      console.error('Error updating appointment status:', error);
+    } catch (error: any) {
+      console.error('Error al actualizar el estado de la cita:', error);
+      // Mostrar mensaje de error específico si está disponible
+      setError(error.message || 'Error al actualizar el estado de la cita');
+      
+      // Reproducir sonido de error (opcional)
+      const errorSound = new Audio('/sounds/error.mp3');
+      errorSound.play().catch(() => {}); // Silenciar error si el navegador bloquea el audio
     } finally {
       setLoading(null);
     }
@@ -62,41 +86,51 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
     })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
+  // Componente para mostrar el error
+  const ErrorMessage = ({ message }: { message: string }) => (
+    <div className="text-red-600 text-sm bg-red-50 p-4 rounded-md mb-4 flex items-center">
+      <X className="h-5 w-5 mr-2" />
+      <span>{message}</span>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
+      {error && <ErrorMessage message={error} />}
+      
       <div className="flex flex-wrap gap-4 mb-6">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             <Filter className="h-4 w-4 inline-block mr-1" />
-            Status Filter
+            Filtrar por Estado
           </label>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
-            <option value="all">All Status</option>
-            <option value="pending">Pending</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="completed">Completed</option>
+            <option value="all">Todos los Estados</option>
+            <option value="pending">Pendientes</option>
+            <option value="confirmed">Confirmadas</option>
+            <option value="cancelled">Canceladas</option>
+            <option value="completed">Completadas</option>
           </select>
         </div>
         
         <div className="flex-1 min-w-[200px]">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             <Calendar className="h-4 w-4 inline-block mr-1" />
-            Date Filter
+            Filtrar por Fecha
           </label>
           <select
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
-            <option value="all">All Dates</option>
-            <option value="past">Past</option>
-            <option value="today">Today</option>
-            <option value="upcoming">Upcoming</option>
+            <option value="all">Todas las Fechas</option>
+            <option value="past">Pasadas</option>
+            <option value="today">Hoy</option>
+            <option value="upcoming">Próximas</option>
           </select>
         </div>
       </div>
@@ -106,6 +140,12 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
           {filteredAppointments.map((appointment) => {
             const statusColors = getStatusColor(appointment.status);
             const isLoading = loading === appointment.id;
+            
+            console.log('Renderizando cita:', { 
+              id: appointment.id, 
+              status: appointment.status,
+              serviceType: appointment.serviceType
+            });
             
             return (
               <div
@@ -118,41 +158,39 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
                       {appointment.serviceType}
                     </span>
                     <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${statusColors.bg} ${statusColors.text}`}>
-                      {appointment.status}
+                      {getStatusText(appointment.status)}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <div className="flex items-center text-gray-600">
-                        <User className="h-4 w-4 mr-2" />
-                        <span>{appointment.patientName}</span>
-                      </div>
-                      
-                      <div className="flex items-center text-gray-600">
-                        <Mail className="h-4 w-4 mr-2" />
-                        <span>{appointment.patientEmail}</span>
-                      </div>
-                      
-                      <div className="flex items-center text-gray-600">
-                        <Calendar className="h-4 w-4 mr-2" />
-                        <span>{format(parseISO(appointment.date), 'EEEE, MMMM d, yyyy')}</span>
-                      </div>
-                      
-                      <div className="flex items-center text-gray-600">
-                        <Clock className="h-4 w-4 mr-2" />
-                        <span>{format(parseISO(appointment.date), 'h:mm a')}</span>
-                      </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center text-gray-600">
+                      <User className="h-4 w-4 mr-2" />
+                      <span>{appointment.patientName}</span>
                     </div>
+                    
+                    <div className="flex items-center text-gray-600">
+                      <Mail className="h-4 w-4 mr-2" />
+                      <span>{appointment.patientEmail}</span>
+                    </div>
+                    
+                    <div className="flex items-center text-gray-600">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      <span>{format(parseISO(appointment.date), 'EEEE, d \'de\' MMMM \'de\' yyyy', { locale: es })}</span>
+                    </div>
+                    
+                    <div className="flex items-center text-gray-600">
+                      <Clock className="h-4 w-4 mr-2" />
+                      <span>{format(parseISO(appointment.date), 'h:mm a')}</span>
+                    </div>
+                  </div>
 
-                    <div>
-                      {appointment.notes && (
-                        <div className="flex items-start text-gray-600">
-                          <FileText className="h-4 w-4 mr-2 mt-1" />
-                          <span className="text-sm">{appointment.notes}</span>
-                        </div>
-                      )}
-                    </div>
+                  <div>
+                    {appointment.notes && (
+                      <div className="flex items-start text-gray-600">
+                        <FileText className="h-4 w-4 mr-2 mt-1" />
+                        <span className="text-sm">{appointment.notes}</span>
+                      </div>
+                    )}
                   </div>
 
                   {appointment.status === 'pending' && (
@@ -163,7 +201,7 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
                         className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
                       >
                         <Check className="h-4 w-4 mr-1" />
-                        Confirm
+                        {isLoading ? 'Confirmando...' : 'Confirmar'}
                       </button>
                       <button
                         onClick={() => handleStatusUpdate(appointment.id, 'cancelled')}
@@ -171,7 +209,7 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
                         className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
                       >
                         <X className="h-4 w-4 mr-1" />
-                        Cancel
+                        {isLoading ? 'Cancelando...' : 'Cancelar'}
                       </button>
                     </div>
                   )}
@@ -184,7 +222,7 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
                         className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                       >
                         <Check className="h-4 w-4 mr-1" />
-                        Mark as Completed
+                        {isLoading ? 'Completando...' : 'Marcar como Completada'}
                       </button>
                     </div>
                   )}
@@ -196,11 +234,11 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
       ) : (
         <div className="text-center py-12 bg-gray-50 rounded-lg">
           <Calendar className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No appointments found</h3>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No se encontraron citas</h3>
           <p className="mt-1 text-sm text-gray-500">
             {statusFilter !== 'all' || dateFilter !== 'all'
-              ? 'Try changing your filters to see more appointments'
-              : 'No appointments have been scheduled yet'}
+              ? 'Intenta cambiar los filtros para ver más citas'
+              : 'No hay citas programadas aún'}
           </p>
         </div>
       )}

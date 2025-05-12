@@ -1,8 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { CreateAppointment, CreateAppointmentSchema } from '../domain/appointment';
+import { CreateAppointmentSchema } from '../domain/appointment';
 import { AppointmentService } from '../services/appointmentService';
+import { NotificationService } from '../services/notificationService';
 import { Calendar, CheckCircle } from 'lucide-react';
 import { format, addMinutes, addMonths, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { ZodError } from 'zod';
 
 interface AppointmentFormProps {
   userId: string;
@@ -53,10 +56,11 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
     try {
       const formData = new FormData(e.currentTarget);
       const dateValue = formData.get('date') as string;
+      const serviceType = formData.get('serviceType') as string;
       
       // Validar que la fecha no esté vacía
       if (!dateValue) {
-        throw new Error('Please select an appointment date and time');
+        throw new Error('Por favor seleccione una fecha y hora para la cita');
       }
 
       // Convertir la fecha local a UTC ISO string
@@ -65,7 +69,7 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
 
       const appointmentData = {
         userId,
-        serviceType: formData.get('serviceType') as string,
+        serviceType,
         date: formattedDate,
         notes: formData.get('notes') as string || null
       };
@@ -73,19 +77,27 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
       // Validar los datos usando el esquema
       const validatedData = CreateAppointmentSchema.parse(appointmentData);
       
-      await AppointmentService.createAppointment(validatedData);
+      // Crear la cita
+      const appointment = await AppointmentService.createAppointment(validatedData);
+
+      // Crear notificación
+      await NotificationService.createAppointmentNotification(
+        userId,
+        'appointment_created',
+        formattedDate,
+        serviceType
+      );
+
       resetForm();
       onSuccess();
     } catch (err) {
-      if (err instanceof Error) {
+      if (err instanceof ZodError) {
+        // Manejar errores de validación de Zod
+        setError(err.errors.map(e => e.message).join(', '));
+      } else if (err instanceof Error) {
         setError(err.message);
       } else {
-        const zodError = err as any;
-        if (zodError.issues) {
-          setError(zodError.issues.map((issue: any) => issue.message).join(', '));
-        } else {
-          setError('An error occurred while validating the appointment data');
-        }
+        setError('Ha ocurrido un error al validar los datos de la cita');
       }
     } finally {
       setLoading(false);
@@ -96,7 +108,7 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
     <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
       <div>
         <label htmlFor="serviceType" className="block text-sm font-medium text-gray-700">
-          Service Type
+          Tipo de Servicio
         </label>
         <select
           id="serviceType"
@@ -104,16 +116,16 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
           required
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
         >
-          <option value="">Select a service</option>
-          <option value="Physical Therapy">Physical Therapy</option>
-          <option value="Sports Medicine">Sports Medicine</option>
-          <option value="Rehabilitation">Rehabilitation</option>
+          <option value="">Seleccionar servicio</option>
+          <option value="Physical Therapy">Fisioterapia</option>
+          <option value="Sports Medicine">Medicina Deportiva</option>
+          <option value="Rehabilitation">Rehabilitación</option>
         </select>
       </div>
 
       <div>
         <label htmlFor="date" className="block text-sm font-medium text-gray-700">
-          Appointment Date & Time
+          Fecha y Hora de la Cita
         </label>
         <input
           type="datetime-local"
@@ -127,20 +139,20 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
         />
         <p className="mt-1 text-sm text-gray-500">
-          Please select a date and time between {format(minDate, 'PPP p')} and {format(maxDate, 'PPP')}
+          Por favor seleccione una fecha y hora entre {format(minDate, 'PPP p', { locale: es })} y {format(maxDate, 'PPP', { locale: es })}
         </p>
       </div>
 
       <div>
         <label htmlFor="notes" className="block text-sm font-medium text-gray-700">
-          Notes (optional)
+          Notas (opcional)
         </label>
         <textarea
           id="notes"
           name="notes"
           rows={3}
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-          placeholder="Any additional information or special requirements"
+          placeholder="Información adicional o requerimientos especiales..."
         />
       </div>
 
@@ -153,7 +165,7 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
       {success && (
         <div className="text-green-600 text-sm bg-green-50 p-3 rounded-md flex items-center">
           <CheckCircle className="h-5 w-5 mr-2" />
-          Appointment booked successfully!
+          ¡Cita agendada exitosamente!
         </div>
       )}
 
@@ -162,7 +174,7 @@ export function AppointmentForm({ userId, onSuccess }: AppointmentFormProps) {
         disabled={loading}
         className="inline-flex items-center justify-center w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
       >
-        {loading ? 'Booking...' : 'Book Appointment'}
+        {loading ? 'Agendando...' : 'Agendar Cita'}
         <Calendar className="ml-2 h-4 w-4" />
       </button>
     </form>

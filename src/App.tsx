@@ -46,12 +46,14 @@ function App() {
 
   const loadAppointments = async () => {
     try {
+      console.log('Cargando citas...', { isAdmin, userId: session?.user?.id });
       const appointments = isAdmin 
         ? await AppointmentService.getAllAppointments()
         : await AppointmentService.getUserAppointments(session.user.id);
+      console.log('Citas cargadas:', appointments);
       setAppointments(appointments);
     } catch (error) {
-      console.error('Error loading appointments:', error);
+      console.error('Error al cargar las citas:', error);
     } finally {
       setLoading(false);
     }

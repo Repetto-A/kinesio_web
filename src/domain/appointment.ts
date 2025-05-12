@@ -4,23 +4,27 @@ import { addMinutes, addMonths, isAfter, isBefore } from 'date-fns';
 export const AppointmentSchema = z.object({
   id: z.string().uuid(),
   userId: z.string().uuid(),
-  serviceType: z.string().min(1, 'Service type is required'),
-  date: z.string().datetime({ message: 'Please provide a valid date and time' }),
+  serviceType: z.string().min(1, 'El tipo de servicio es requerido'),
+  date: z.string().datetime({ message: 'Por favor proporcione una fecha y hora válida' }),
   status: z.enum(['pending', 'confirmed', 'cancelled', 'completed']),
   notes: z.string().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   patientName: z.string().optional(),
-  patientEmail: z.string().optional()
+  patientEmail: z.string().optional(),
+  patientSex: z.enum(['male', 'female', 'other']).nullable().optional(),
+  patientAge: z.number().nullable().optional(),
+  patientPhone: z.string().nullable().optional(),
+  clinicalNotes: z.string().nullable().optional()
 });
 
 export type Appointment = z.infer<typeof AppointmentSchema>;
 
 export const CreateAppointmentSchema = z.object({
-  userId: z.string().uuid(),
-  serviceType: z.string().min(1, 'Service type is required'),
+  userId: z.string().uuid('ID de usuario inválido'),
+  serviceType: z.string().min(1, 'El tipo de servicio es requerido'),
   date: z.string()
-    .datetime({ message: 'Please provide a valid date and time' })
+    .datetime({ message: 'Por favor proporcione una fecha y hora válida' })
     .refine((dateStr) => {
       try {
         const date = new Date(dateStr);
@@ -33,9 +37,9 @@ export const CreateAppointmentSchema = z.object({
         return false;
       }
     }, {
-      message: 'Appointment must be between 30 minutes from now and 3 months in the future'
+      message: 'La cita debe ser entre 30 minutos desde ahora y 3 meses en el futuro'
     }),
-  notes: z.string().nullable()
+  notes: z.string().nullable().optional()
 });
 
 export type CreateAppointment = z.infer<typeof CreateAppointmentSchema>;
