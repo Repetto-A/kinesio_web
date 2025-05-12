@@ -43,21 +43,55 @@ export function AdminAppointmentList({ appointments, onStatusUpdate }: AdminAppo
   };
 
   const handleStatusUpdate = async (id: string, status: 'confirmed' | 'cancelled' | 'completed') => {
-    console.log('Intentando actualizar cita:', { id, status });
+    console.log('Iniciando actualización de cita:', { id, status });
     setLoading(id);
     setError(null);
+    
+    if (!id) {
+      const errorMsg = 'ID de cita no válido';
+      console.error(errorMsg);
+      setError(errorMsg);
+      setLoading(null);
+      return;
+    }
+
+    if (!['confirmed', 'cancelled', 'completed'].includes(status)) {
+      const errorMsg = 'Estado de cita no válido';
+      console.error(errorMsg, status);
+      setError(errorMsg);
+      setLoading(null);
+      return;
+    }
+
     try {
+      console.log('Llamando a updateAppointmentStatus con:', { id, status });
       await AppointmentService.updateAppointmentStatus(id, status);
       console.log('Cita actualizada exitosamente:', { id, status });
       onStatusUpdate();
-    } catch (error: any) {
-      console.error('Error al actualizar el estado de la cita:', error);
-      // Mostrar mensaje de error específico si está disponible
-      setError(error.message || 'Error al actualizar el estado de la cita');
+    } catch (error) {
+      console.error('Error detallado al actualizar el estado de la cita:', {
+        error,
+        errorMessage: error instanceof Error ? error.message : 'Error desconocido',
+        errorStack: error instanceof Error ? error.stack : undefined,
+        id,
+        status
+      });
+      
+      // Manejar el error y mostrar mensaje apropiado
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError('Error al actualizar el estado de la cita');
+      }
       
       // Reproducir sonido de error (opcional)
-      const errorSound = new Audio('/sounds/error.mp3');
-      errorSound.play().catch(() => {}); // Silenciar error si el navegador bloquea el audio
+      try {
+        const errorSound = new Audio('/sounds/error.mp3');
+        await errorSound.play();
+      } catch (audioError) {
+        // Ignorar errores de reproducción de audio
+        console.log('No se pudo reproducir el sonido de error');
+      }
     } finally {
       setLoading(null);
     }

@@ -27,7 +27,7 @@ export class AppointmentService {
       .from('appointments')
       .select(`
         *,
-        profiles:user_id (
+        profile:user_id (
           first_name,
           last_name,
           email,
@@ -57,94 +57,150 @@ export class AppointmentService {
   }
 
   static async getUserAppointments(userId: string): Promise<Appointment[]> {
+    console.log('Obteniendo citas del usuario:', userId);
     const { data, error } = await supabase
-      .from('appointments')
-      .select('*')
-      .eq('user_id', userId)
-      .order('date', { ascending: true });
-
-    if (error) throw new Error(error.message);
-    return data.map(this.mapAppointment);
-  }
-
-  static async updateAppointmentStatus(id: string, status: 'confirmed' | 'cancelled' | 'completed'): Promise<void> {
-    console.log('Actualizando estado de cita:', { id, status });
-    
-    if (!id || typeof id !== 'string' || id.trim() === '') {
-      throw new Error('El ID de la cita es requerido y debe ser un string válido');
-    }
-
-    // Primero obtener la cita actual con información del perfil
-    const { data: appointments, error: fetchError } = await supabase
       .from('appointments')
       .select(`
         *,
-        profiles:user_id (
+        profile:user_id (
           first_name,
           last_name,
-          email
+          email,
+          sex,
+          age,
+          phone_number,
+          clinical_notes
         )
       `)
-      .eq('id', id.trim())
-      .limit(2); // Obtenemos hasta 2 para verificar si hay duplicados
+      .eq('user_id', userId)
+      .order('date', { ascending: true });
 
-    console.log('Resultado de la búsqueda:', { appointments, fetchError });
-
-    if (fetchError) {
-      console.error('Error al obtener la cita:', fetchError);
-      throw new Error(`Error al obtener la cita: ${fetchError.message}`);
+    if (error) {
+      console.error('Error al obtener las citas del usuario:', error);
+      throw new Error(error.message);
     }
 
-    if (!appointments || appointments.length === 0) {
-      console.error('No se encontró la cita con ID:', id);
-      throw new Error('No se encontró la cita especificada');
+    console.log('Datos crudos de citas del usuario:', data);
+
+    if (!data) {
+      console.log('No se encontraron citas para el usuario');
+      return [];
     }
 
-    if (appointments.length > 1) {
-      console.error('Múltiples citas encontradas:', appointments);
-      throw new Error('Se encontraron múltiples citas con el mismo ID. Por favor, contacte al administrador');
+    const mappedAppointments = data.map(this.mapAppointmentWithProfile);
+    console.log('Citas mapeadas del usuario:', mappedAppointments);
+    return mappedAppointments;
+  }
+
+  static async updateAppointmentStatus(id: string, status: 'confirmed' | 'cancelled' | 'completed'): Promise<void> {
+    console.log('Iniciando updateAppointmentStatus:', { id, status });
+    console.log('Tipo de ID:', typeof id, 'Longitud:', id.length);
+    
+    // Validación inicial de parámetros
+    if (!id?.trim()) {
+      const error = new Error('El ID de la cita es requerido');
+      console.error('Error de validación:', error);
+      throw error;
     }
 
-    const appointment = appointments[0];
-    console.log('Cita encontrada:', appointment);
-
-    // Validar transición de estado
-    if (appointment.status === 'cancelled') {
-      throw new Error('No se puede modificar una cita cancelada');
+    if (!status || !['confirmed', 'cancelled', 'completed'].includes(status)) {
+      const error = new Error(`Estado no válido: ${status}`);
+      console.error('Error de validación:', error);
+      throw error;
     }
 
-    if (appointment.status === 'completed') {
-      throw new Error('No se puede modificar una cita completada');
-    }
+    const cleanId = id.trim();
+    console.log('ID limpio a utilizar:', cleanId);
 
-    // Actualizar el estado
-    const { error: updateError } = await supabase
-      .from('appointments')
-      .update({ 
-        status,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id.trim());
-
-    if (updateError) {
-      console.error('Error al actualizar el estado:', updateError);
-      throw new Error(`Error al actualizar el estado de la cita: ${updateError.message}`);
-    }
-
-    console.log('Estado actualizado correctamente');
-
-    // Enviar notificación
     try {
-      await NotificationService.createAppointmentNotification(
-        appointment.user_id,
-        'appointment_updated',
-        appointment.date,
-        appointment.service_type
-      );
-      console.log('Notificación enviada correctamente');
+      // Verificar el usuario actual
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      console.log('Usuario actual:', { id: user?.id, email: user?.email });
+
+      if (userError) {
+        console.error('Error al obtener usuario:', userError);
+        throw new Error('Error de autenticación: ' + userError.message);
+      }
+
+      if (!user) {
+        const error = new Error('Usuario no autenticado');
+        console.error('Error de autenticación:', error);
+        throw error;
+      }
+
+      // Verificar si la cita existe
+      console.log('Buscando cita con ID:', cleanId);
+      const { data: appointment, error: appointmentError } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('id', cleanId)
+        .maybeSingle();
+
+      if (appointmentError) {
+        console.error('Error al buscar la cita:', appointmentError);
+        throw new Error('Error al buscar la cita: ' + appointmentError.message);
+      }
+
+      if (!appointment) {
+        const error = new Error(`No se encontró la cita con ID: ${cleanId}`);
+        console.error('Error de búsqueda:', error);
+        throw error;
+      }
+
+      console.log('Cita encontrada:', appointment);
+
+      // Validar transición de estado
+      if (appointment.status === status) {
+        const error = new Error(`La cita ya está en estado: ${status}`);
+        console.error('Error de estado:', error);
+        throw error;
+      }
+
+      if (appointment.status === 'cancelled') {
+        const error = new Error('No se puede modificar una cita cancelada');
+        console.error('Error de estado:', error);
+        throw error;
+      }
+
+      if (appointment.status === 'completed') {
+        const error = new Error('No se puede modificar una cita completada');
+        console.error('Error de estado:', error);
+        throw error;
+      }
+
+      // Actualizar el estado
+      console.log('Actualizando estado de la cita:', { id: cleanId, status });
+      const { error: updateError } = await supabase
+        .from('appointments')
+        .update({ 
+          status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', cleanId);
+
+      if (updateError) {
+        console.error('Error al actualizar el estado:', updateError);
+        throw new Error('Error al actualizar el estado: ' + updateError.message);
+      }
+
+      console.log('Estado actualizado correctamente');
+
+      // Enviar notificación
+      try {
+        await NotificationService.createAppointmentNotification(
+          appointment.user_id,
+          'appointment_updated',
+          appointment.date,
+          appointment.service_type
+        );
+        console.log('Notificación enviada correctamente');
+      } catch (error) {
+        console.error('Error al enviar la notificación:', error);
+        // No interrumpimos el flujo principal, pero registramos el error
+      }
     } catch (error) {
-      console.error('Error al enviar la notificación:', error);
-      // No interrumpimos el flujo principal, pero registramos el error
+      console.error('Error en updateAppointmentStatus:', error);
+      throw error instanceof Error ? error : new Error('Error desconocido al actualizar la cita');
     }
   }
 
@@ -212,8 +268,9 @@ export class AppointmentService {
 
     console.log('Mapeando cita con perfil:', data);
     
-    const fullName = data.profiles ? 
-      `${data.profiles.first_name || ''} ${data.profiles.last_name || ''}`.trim() : 
+    const profile = data.profile;
+    const fullName = profile ? 
+      `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : 
       'Unknown';
 
     return {
@@ -226,11 +283,11 @@ export class AppointmentService {
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       patientName: fullName || 'Unknown',
-      patientEmail: data.profiles?.email || 'No email',
-      patientSex: data.profiles?.sex || null,
-      patientAge: data.profiles?.age || null,
-      patientPhone: data.profiles?.phone_number || null,
-      clinicalNotes: data.profiles?.clinical_notes || null
+      patientEmail: profile?.email || 'No email',
+      patientSex: profile?.sex || null,
+      patientAge: profile?.age || null,
+      patientPhone: profile?.phone_number || null,
+      clinicalNotes: profile?.clinical_notes || null
     };
   }
 }

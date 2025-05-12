@@ -21,18 +21,41 @@
       - Cancel their own appointments
 */
 
--- Create profiles table first
-CREATE TABLE IF NOT EXISTS profiles (
+-- Drop ALL existing policies first
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.profiles;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.profiles;
+DROP POLICY IF EXISTS "Enable update for users based on email" ON public.profiles;
+DROP POLICY IF EXISTS "Enable delete for users based on email" ON public.profiles;
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Admins can view all profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Admins can update all profiles" ON public.profiles;
+
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.appointments;
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.appointments;
+DROP POLICY IF EXISTS "Enable update for users based on email" ON public.appointments;
+DROP POLICY IF EXISTS "Enable delete for users based on email" ON public.appointments;
+DROP POLICY IF EXISTS "Users can view appointments" ON public.appointments;
+DROP POLICY IF EXISTS "Users can create appointments" ON public.appointments;
+DROP POLICY IF EXISTS "Users can update appointments" ON public.appointments;
+DROP POLICY IF EXISTS "Users can delete appointments" ON public.appointments;
+
+-- Create tables if not exist
+CREATE TABLE IF NOT EXISTS public.profiles (
   id uuid REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
-  full_name text,
+  first_name text,
+  last_name text,
   email text,
-  role text DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+  role text DEFAULT 'user' CHECK (role IN ('user', 'worker', 'admin')),
+  sex text CHECK (sex IN ('male', 'female', 'other')),
+  age integer CHECK (age >= 0),
+  phone_number text,
+  clinical_notes text,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
 
--- Create appointments table
-CREATE TABLE IF NOT EXISTS appointments (
+CREATE TABLE IF NOT EXISTS public.appointments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES auth.users NOT NULL,
   service_type text NOT NULL,
@@ -46,27 +69,35 @@ CREATE TABLE IF NOT EXISTS appointments (
 );
 
 -- Enable RLS
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
 
--- Create trigger function for new users
+-- Create or replace functions
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, role)
+  INSERT INTO public.profiles (
+    id,
+    email,
+    role,
+    first_name,
+    last_name
+  )
   VALUES (
     new.id,
     new.email,
     CASE 
       WHEN new.email = 'admin@example.com' THEN 'admin'
+      WHEN new.email LIKE '%@staff.com' THEN 'worker'
       ELSE 'user'
-    END
+    END,
+    new.raw_user_meta_data->>'first_name',
+    new.raw_user_meta_data->>'last_name'
   );
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Create trigger for updating updated_at timestamp
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS trigger AS $$
 BEGIN
@@ -75,133 +106,109 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create triggers
+-- Recreate triggers
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
-DROP TRIGGER IF EXISTS appointments_updated_at ON appointments;
+DROP TRIGGER IF EXISTS appointments_updated_at ON public.appointments;
 CREATE TRIGGER appointments_updated_at
-  BEFORE UPDATE ON appointments
+  BEFORE UPDATE ON public.appointments
   FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
-DROP TRIGGER IF EXISTS profiles_updated_at ON profiles;
+DROP TRIGGER IF EXISTS profiles_updated_at ON public.profiles;
 CREATE TRIGGER profiles_updated_at
-  BEFORE UPDATE ON profiles
+  BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
--- Drop existing policies
-DROP POLICY IF EXISTS "Users can view appointments" ON appointments;
-DROP POLICY IF EXISTS "Users can create appointments" ON appointments;
-DROP POLICY IF EXISTS "Users can update appointments" ON appointments;
-DROP POLICY IF EXISTS "Users can delete appointments" ON appointments;
-DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
-DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
-DROP POLICY IF EXISTS "Admins can view all profiles" ON profiles;
-DROP POLICY IF EXISTS "Admins can update all profiles" ON profiles;
+-- Create new policies
+CREATE POLICY "Users can view own profile"
+  ON public.profiles
+  FOR SELECT
+  TO authenticated
+  USING (
+    auth.uid() = id OR 
+    EXISTS (
+      SELECT 1 FROM public.profiles 
+      WHERE profiles.id = auth.uid() 
+      AND profiles.role IN ('worker', 'admin')
+    )
+  );
 
--- Create policies for appointments table
+CREATE POLICY "Users can update own profile"
+  ON public.profiles
+  FOR UPDATE
+  TO authenticated
+  USING (
+    auth.uid() = id OR 
+    EXISTS (
+      SELECT 1 FROM public.profiles 
+      WHERE profiles.id = auth.uid() 
+      AND profiles.role IN ('worker', 'admin')
+    )
+  );
+
 CREATE POLICY "Users can view appointments"
-  ON appointments
+  ON public.appointments
   FOR SELECT
   TO authenticated
   USING (
     auth.uid() = user_id OR 
     EXISTS (
-      SELECT 1 FROM profiles 
+      SELECT 1 FROM public.profiles 
       WHERE profiles.id = auth.uid() 
-      AND profiles.role = 'admin'
+      AND profiles.role IN ('worker', 'admin')
     )
   );
 
 CREATE POLICY "Users can create appointments"
-  ON appointments
+  ON public.appointments
   FOR INSERT
   TO authenticated
   WITH CHECK (auth.uid() = user_id);
 
 CREATE POLICY "Users can update appointments"
-  ON appointments
+  ON public.appointments
   FOR UPDATE
   TO authenticated
   USING (
     auth.uid() = user_id OR 
     EXISTS (
-      SELECT 1 FROM profiles 
+      SELECT 1 FROM public.profiles 
       WHERE profiles.id = auth.uid() 
-      AND profiles.role = 'admin'
-    )
-  )
-  WITH CHECK (
-    auth.uid() = user_id OR 
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE profiles.id = auth.uid() 
-      AND profiles.role = 'admin'
+      AND profiles.role IN ('worker', 'admin')
     )
   );
 
 CREATE POLICY "Users can delete appointments"
-  ON appointments
+  ON public.appointments
   FOR DELETE
   TO authenticated
   USING (
     auth.uid() = user_id OR 
     EXISTS (
-      SELECT 1 FROM profiles 
+      SELECT 1 FROM public.profiles 
       WHERE profiles.id = auth.uid() 
-      AND profiles.role = 'admin'
+      AND profiles.role IN ('worker', 'admin')
     )
   );
 
--- Create policies for profiles table
-CREATE POLICY "Users can view own profile"
-  ON profiles
-  FOR SELECT
-  TO authenticated
-  USING (auth.uid() = id);
+-- Create or replace indexes
+DROP INDEX IF EXISTS idx_appointments_user_id;
+DROP INDEX IF EXISTS idx_appointments_date;
+DROP INDEX IF EXISTS idx_appointments_status;
+DROP INDEX IF EXISTS idx_profiles_email;
+DROP INDEX IF EXISTS idx_profiles_role;
 
-CREATE POLICY "Users can update own profile"
-  ON profiles
-  FOR UPDATE
-  TO authenticated
-  USING (auth.uid() = id)
-  WITH CHECK (auth.uid() = id);
+CREATE INDEX idx_appointments_user_id ON public.appointments(user_id);
+CREATE INDEX idx_appointments_date ON public.appointments(date);
+CREATE INDEX idx_appointments_status ON public.appointments(status);
+CREATE INDEX idx_profiles_email ON public.profiles(email);
+CREATE INDEX idx_profiles_role ON public.profiles(role);
 
-CREATE POLICY "Admins can view all profiles"
-  ON profiles
-  FOR SELECT
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE profiles.id = auth.uid() 
-      AND profiles.role = 'admin'
-    )
-  );
-
-CREATE POLICY "Admins can update all profiles"
-  ON profiles
-  FOR UPDATE
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE profiles.id = auth.uid() 
-      AND profiles.role = 'admin'
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM profiles 
-      WHERE profiles.id = auth.uid() 
-      AND profiles.role = 'admin'
-    )
-  );
-
--- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS appointments_user_id_idx ON appointments(user_id);
-CREATE INDEX IF NOT EXISTS appointments_date_idx ON appointments(date);
-CREATE INDEX IF NOT EXISTS appointments_status_idx ON appointments(status);
-CREATE INDEX IF NOT EXISTS profiles_email_idx ON profiles(email);
+-- Grant necessary permissions
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO authenticated;
