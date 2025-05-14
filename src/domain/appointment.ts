@@ -6,7 +6,7 @@ export const AppointmentSchema = z.object({
   userId: z.string().uuid(),
   serviceType: z.string().min(1, 'El tipo de servicio es requerido'),
   date: z.string().datetime({ message: 'Por favor proporcione una fecha y hora válida' }),
-  status: z.enum(['pending', 'confirmed', 'cancelled', 'completed']),
+  status: z.enum(['pending', 'confirmed', 'cancelled', 'completed']).default('pending'),
   notes: z.string().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

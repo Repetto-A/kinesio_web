@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Appointment } from '../domain/appointment';
 import { format, isAfter, isBefore, startOfDay, endOfDay, parseISO } from 'date-fns';
 import { Calendar, Clock, FileText, X, Filter, ChevronDown } from 'lucide-react';
+import { es } from 'date-fns/locale';
 
 interface AppointmentListProps {
   appointments: Appointment[];
@@ -11,6 +12,8 @@ interface AppointmentListProps {
 export function AppointmentList({ appointments, onCancel }: AppointmentListProps) {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<string>('upcoming');
+  const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -22,6 +25,31 @@ export function AppointmentList({ appointments, onCancel }: AppointmentListProps
         return { bg: 'bg-blue-100', text: 'text-blue-800' };
       default:
         return { bg: 'bg-yellow-100', text: 'text-yellow-800' };
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'confirmed':
+        return 'Confirmada';
+      case 'cancelled':
+        return 'Cancelada';
+      case 'completed':
+        return 'Completada';
+      default:
+        return 'Pendiente';
+    }
+  };
+
+  const handleCancel = async (id: string) => {
+    setLoading(id);
+    setError(null);
+    try {
+      await onCancel(id);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Error al cancelar la cita');
+    } finally {
+      setLoading(null);
     }
   };
 
@@ -46,43 +74,58 @@ export function AppointmentList({ appointments, onCancel }: AppointmentListProps
           return true;
       }
     })
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    .sort((a, b) => {
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
+
+  console.log('Citas filtradas finales:', filteredAppointments.map(cita => ({
+    id: cita.id,
+    status: cita.status,
+    date: cita.date
+  })));
 
   return (
     <div className="space-y-4">
+      {error && (
+        <div className="text-red-600 text-sm bg-red-50 p-4 rounded-md mb-4 flex items-center">
+          <X className="h-5 w-5 mr-2" />
+          <span>{error}</span>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-4 mb-6">
         <div className="flex-1 min-w-[200px]">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             <Filter className="h-4 w-4 inline-block mr-1" />
-            Status Filter
+            Filtrar por Estado
           </label>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
-            <option value="all">All Status</option>
-            <option value="pending">Pending</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="completed">Completed</option>
+            <option value="all">Todos los Estados</option>
+            <option value="pending">Pendientes</option>
+            <option value="confirmed">Confirmadas</option>
+            <option value="cancelled">Canceladas</option>
+            <option value="completed">Completadas</option>
           </select>
         </div>
         
         <div className="flex-1 min-w-[200px]">
           <label className="block text-sm font-medium text-gray-700 mb-1">
             <Calendar className="h-4 w-4 inline-block mr-1" />
-            Date Filter
+            Filtrar por Fecha
           </label>
           <select
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
-            <option value="all">All Dates</option>
-            <option value="past">Past</option>
-            <option value="today">Today</option>
-            <option value="upcoming">Upcoming</option>
+            <option value="all">Todas las Fechas</option>
+            <option value="past">Pasadas</option>
+            <option value="today">Hoy</option>
+            <option value="upcoming">Próximas</option>
           </select>
         </div>
       </div>
@@ -91,6 +134,18 @@ export function AppointmentList({ appointments, onCancel }: AppointmentListProps
         <div className="grid gap-4">
           {filteredAppointments.map((appointment) => {
             const statusColors = getStatusColor(appointment.status);
+            const appointmentDate = parseISO(appointment.date);
+            const canCancel = isAfter(appointmentDate, new Date()) && 
+                            (appointment.status === 'pending' || appointment.status === 'confirmed');
+            const isLoading = loading === appointment.id;
+            
+            console.log('Renderizando cita:', {
+              id: appointment.id,
+              status: appointment.status,
+              date: appointment.date,
+              canCancel
+            });
+            
             return (
               <div
                 key={appointment.id}
@@ -103,18 +158,18 @@ export function AppointmentList({ appointments, onCancel }: AppointmentListProps
                         {appointment.serviceType}
                       </span>
                       <span className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${statusColors.bg} ${statusColors.text}`}>
-                        {appointment.status}
+                        {getStatusText(appointment.status)}
                       </span>
                     </div>
                     
                     <div className="flex items-center text-gray-600">
                       <Calendar className="h-4 w-4 mr-2" />
-                      <span>{format(parseISO(appointment.date), 'EEEE, MMMM d, yyyy')}</span>
+                      <span>{format(appointmentDate, 'EEEE, d \'de\' MMMM \'de\' yyyy', { locale: es })}</span>
                     </div>
                     
                     <div className="flex items-center text-gray-600">
                       <Clock className="h-4 w-4 mr-2" />
-                      <span>{format(parseISO(appointment.date), 'h:mm a')}</span>
+                      <span>{format(appointmentDate, 'h:mm a')}</span>
                     </div>
 
                     {appointment.notes && (
@@ -125,13 +180,18 @@ export function AppointmentList({ appointments, onCancel }: AppointmentListProps
                     )}
                   </div>
 
-                  {appointment.status === 'pending' && (
+                  {canCancel && (
                     <button
-                      onClick={() => onCancel(appointment.id)}
-                      className="ml-4 text-red-600 hover:text-red-800 transition-colors"
-                      title="Cancel appointment"
+                      onClick={() => handleCancel(appointment.id)}
+                      disabled={isLoading}
+                      className="ml-4 text-red-600 hover:text-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Cancelar cita"
                     >
-                      <X className="h-5 w-5" />
+                      {isLoading ? (
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-red-600"></div>
+                      ) : (
+                        <X className="h-5 w-5" />
+                      )}
                     </button>
                   )}
                 </div>
@@ -142,11 +202,11 @@ export function AppointmentList({ appointments, onCancel }: AppointmentListProps
       ) : (
         <div className="text-center py-12 bg-gray-50 rounded-lg">
           <Calendar className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No appointments found</h3>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">No se encontraron citas</h3>
           <p className="mt-1 text-sm text-gray-500">
             {statusFilter !== 'all' || dateFilter !== 'all'
-              ? 'Try changing your filters to see more appointments'
-              : 'No appointments have been scheduled yet'}
+              ? 'Intenta cambiar los filtros para ver más citas'
+              : 'Aún no se han programado citas'}
           </p>
         </div>
       )}

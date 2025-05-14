@@ -2,109 +2,130 @@ import { supabase } from '../lib/supabase';
 import { Appointment, CreateAppointment } from '../domain/appointment';
 import { format } from 'date-fns';
 import { NotificationService } from './notificationService';
+import { Database } from '../types/supabase';
+
+type AppointmentRow = Database['public']['Tables']['appointments']['Row'];
+type AppointmentInsert = Database['public']['Tables']['appointments']['Insert'];
+type AppointmentUpdate = Database['public']['Tables']['appointments']['Update'];
 
 export class AppointmentService {
   static async createAppointment(appointment: CreateAppointment): Promise<Appointment> {
-    const { data, error } = await supabase
-      .from('appointments')
-      .insert([{
+    console.log('Creando cita con datos:', appointment);
+    try {
+      // Verificar la conexión con Supabase
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) {
+        console.error('Error de autenticación:', userError);
+        throw new Error('Error de autenticación: ' + userError.message);
+      }
+
+      if (!user) {
+        throw new Error('Usuario no autenticado');
+      }
+
+      console.log('Usuario autenticado:', user.id);
+
+      // Preparar los datos de la cita
+      const appointmentData: AppointmentInsert = {
         user_id: appointment.userId,
         service_type: appointment.serviceType,
         date: format(new Date(appointment.date), "yyyy-MM-dd'T'HH:mm:ssXXX"),
         notes: appointment.notes,
-        status: 'pending' // Estado inicial
-      }])
-      .select()
-      .single();
+        status: 'pending'
+      };
 
-    if (error) throw new Error(error.message);
-    return this.mapAppointment(data);
+      console.log('Datos preparados para insertar:', appointmentData);
+
+      // Intentar crear la cita
+      const { data, error } = await supabase
+        .from('appointments')
+        .insert([appointmentData])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error de Supabase al crear la cita:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          error
+        });
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error('No se recibieron datos de la cita creada');
+      }
+
+      console.log('Cita creada exitosamente:', data);
+      return this.mapAppointment(data);
+    } catch (error: any) {
+      console.error('Error al crear la cita:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+        error
+      });
+      throw error;
+    }
   }
 
   static async getAllAppointments(): Promise<Appointment[]> {
-    console.log('Obteniendo todas las citas...');
-    const { data, error } = await supabase
-      .from('appointments')
-      .select(`
-        *,
-        profile:user_id (
-          first_name,
-          last_name,
-          email,
-          sex,
-          age,
-          phone_number,
-          clinical_notes
-        )
-      `)
-      .order('date', { ascending: true });
+    console.log('Iniciando getAllAppointments...');
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*')
+        .order('date', { ascending: true });
 
-    if (error) {
-      console.error('Error al obtener las citas:', error);
-      throw new Error(error.message);
+      if (error) {
+        console.error('Error en getAllAppointments:', error);
+        throw new Error(error.message);
+      }
+
+      console.log('Datos obtenidos de getAllAppointments:', data);
+      
+      if (!data) {
+        console.log('No se encontraron citas');
+        return [];
+      }
+
+      const mappedAppointments = data.map(this.mapAppointment);
+      console.log('Citas mapeadas:', mappedAppointments);
+      return mappedAppointments;
+    } catch (error) {
+      console.error('Error en getAllAppointments:', error);
+      throw error;
     }
-
-    console.log('Datos crudos de citas:', data);
-
-    if (!data) {
-      console.log('No se encontraron citas');
-      return [];
-    }
-
-    const mappedAppointments = data.map(this.mapAppointmentWithProfile);
-    console.log('Citas mapeadas:', mappedAppointments);
-    return mappedAppointments;
   }
 
   static async getUserAppointments(userId: string): Promise<Appointment[]> {
-    console.log('Obteniendo citas del usuario:', userId);
     const { data, error } = await supabase
       .from('appointments')
-      .select(`
-        *,
-        profile:user_id (
-          first_name,
-          last_name,
-          email,
-          sex,
-          age,
-          phone_number,
-          clinical_notes
-        )
-      `)
+      .select('*')
       .eq('user_id', userId)
       .order('date', { ascending: true });
 
     if (error) {
-      console.error('Error al obtener las citas del usuario:', error);
       throw new Error(error.message);
     }
 
-    console.log('Datos crudos de citas del usuario:', data);
-
     if (!data) {
-      console.log('No se encontraron citas para el usuario');
       return [];
     }
 
-    const mappedAppointments = data.map(this.mapAppointmentWithProfile);
-    console.log('Citas mapeadas del usuario:', mappedAppointments);
-    return mappedAppointments;
+    return data.map(this.mapAppointment);
   }
 
-  static async updateAppointmentStatus(id: string, status: 'confirmed' | 'cancelled' | 'completed'): Promise<void> {
+  static async updateAppointmentStatus(id: string, status: AppointmentRow['status']): Promise<void> {
     console.log('Iniciando updateAppointmentStatus:', { id, status });
     console.log('Tipo de ID:', typeof id, 'Longitud:', id.length);
     
     // Validación inicial de parámetros
     if (!id?.trim()) {
       const error = new Error('El ID de la cita es requerido');
-      console.error('Error de validación:', error);
-      throw error;
-    }
-
-    if (!status || !['confirmed', 'cancelled', 'completed'].includes(status)) {
-      const error = new Error(`Estado no válido: ${status}`);
       console.error('Error de validación:', error);
       throw error;
     }
@@ -156,12 +177,6 @@ export class AppointmentService {
         throw error;
       }
 
-      if (appointment.status === 'cancelled') {
-        const error = new Error('No se puede modificar una cita cancelada');
-        console.error('Error de estado:', error);
-        throw error;
-      }
-
       if (appointment.status === 'completed') {
         const error = new Error('No se puede modificar una cita completada');
         console.error('Error de estado:', error);
@@ -170,12 +185,14 @@ export class AppointmentService {
 
       // Actualizar el estado
       console.log('Actualizando estado de la cita:', { id: cleanId, status });
+      const updateData: AppointmentUpdate = {
+        status,
+        updated_at: new Date().toISOString()
+      };
+
       const { error: updateError } = await supabase
         .from('appointments')
-        .update({ 
-          status,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', cleanId);
 
       if (updateError) {
@@ -205,45 +222,10 @@ export class AppointmentService {
   }
 
   static async cancelAppointment(id: string): Promise<void> {
-    // Primero obtener la cita actual
-    const { data: appointment, error: fetchError } = await supabase
-      .from('appointments')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchError) {
-      throw new Error(`Error fetching appointment: ${fetchError.message}`);
-    }
-
-    // Actualizar el estado
-    const { error: updateError } = await supabase
-      .from('appointments')
-      .update({ 
-        status: 'cancelled',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id);
-
-    if (updateError) {
-      throw new Error(`Error cancelling appointment: ${updateError.message}`);
-    }
-
-    // Enviar notificación
-    try {
-      await NotificationService.createAppointmentNotification(
-        appointment.user_id,
-        'appointment_updated',
-        appointment.date,
-        appointment.service_type
-      );
-    } catch (error) {
-      console.error('Error sending notification:', error);
-      // No lanzamos el error aquí para no interrumpir el flujo principal
-    }
+    await this.updateAppointmentStatus(id, 'cancelled');
   }
 
-  private static mapAppointment(data: any): Appointment {
+  private static mapAppointment(data: AppointmentRow): Appointment {
     if (!data) {
       throw new Error('No se pueden mapear datos nulos');
     }
@@ -254,7 +236,7 @@ export class AppointmentService {
       userId: data.user_id,
       serviceType: data.service_type,
       date: data.date,
-      status: data.status || 'pending',
+      status: data.status,
       notes: data.notes,
       createdAt: data.created_at,
       updatedAt: data.updated_at

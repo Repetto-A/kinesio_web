@@ -15,8 +15,8 @@ export interface Database {
           user_id: string
           service_type: string
           date: string
-          status: string
           notes: string | null
+          status: 'pending' | 'confirmed' | 'cancelled' | 'completed'
           created_at: string
           updated_at: string
         }
@@ -25,8 +25,8 @@ export interface Database {
           user_id: string
           service_type: string
           date: string
-          status?: string
           notes?: string | null
+          status?: 'pending' | 'confirmed' | 'cancelled' | 'completed'
           created_at?: string
           updated_at?: string
         }
@@ -35,8 +35,8 @@ export interface Database {
           user_id?: string
           service_type?: string
           date?: string
-          status?: string
           notes?: string | null
+          status?: 'pending' | 'confirmed' | 'cancelled' | 'completed'
           created_at?: string
           updated_at?: string
         }
@@ -79,11 +79,10 @@ export interface Database {
       profiles: {
         Row: {
           id: string
-          email: string
-          role: 'user' | 'worker' | 'admin'
           first_name: string | null
           last_name: string | null
-          sex: 'male' | 'female' | 'other' | null
+          email: string | null
+          sex: string | null
           age: number | null
           phone_number: string | null
           clinical_notes: string | null
@@ -92,11 +91,10 @@ export interface Database {
         }
         Insert: {
           id: string
-          email: string
-          role?: 'user' | 'worker' | 'admin'
           first_name?: string | null
           last_name?: string | null
-          sex?: 'male' | 'female' | 'other' | null
+          email?: string | null
+          sex?: string | null
           age?: number | null
           phone_number?: string | null
           clinical_notes?: string | null
@@ -105,11 +103,10 @@ export interface Database {
         }
         Update: {
           id?: string
-          email?: string
-          role?: 'user' | 'worker' | 'admin'
           first_name?: string | null
           last_name?: string | null
-          sex?: 'male' | 'female' | 'other' | null
+          email?: string | null
+          sex?: string | null
           age?: number | null
           phone_number?: string | null
           clinical_notes?: string | null
@@ -117,6 +114,15 @@ export interface Database {
           updated_at?: string
         }
       }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      [_ in never]: never
+    }
+    Enums: {
+      [_ in never]: never
     }
   }
 }

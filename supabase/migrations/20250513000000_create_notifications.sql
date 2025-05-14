@@ -24,17 +24,11 @@ ON notifications FOR SELECT
 TO authenticated
 USING (auth.uid() = user_id);
 
--- Only system can insert notifications
-CREATE POLICY "System can insert notifications"
+-- Users can insert their own notifications
+CREATE POLICY "Users can insert their own notifications"
 ON notifications FOR INSERT
 TO authenticated
-WITH CHECK (
-    EXISTS (
-        SELECT 1 FROM profiles
-        WHERE profiles.id = auth.uid()
-        AND profiles.role IN ('worker', 'admin')
-    )
-);
+WITH CHECK (auth.uid() = user_id);
 
 -- Users can mark their notifications as read
 CREATE POLICY "Users can update their own notifications"

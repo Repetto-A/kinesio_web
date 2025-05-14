@@ -6,35 +6,58 @@ type NotificationInsert = Database['public']['Tables']['notifications']['Insert'
 
 export class NotificationService {
   static async createNotification(notification: NotificationInsert) {
-    const { data, error } = await supabase
-      .from('notifications')
-      .insert(notification)
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .insert(notification)
+        .select()
+        .single();
 
-    if (error) throw error;
-    return data;
+      if (error) {
+        console.error('Error al crear notificación:', error);
+        // Si la tabla no existe o hay un error de permisos, no interrumpimos el flujo
+        return null;
+      }
+      return data;
+    } catch (error) {
+      console.error('Error inesperado al crear notificación:', error);
+      return null;
+    }
   }
 
   static async getUserNotifications(userId: string) {
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    return data;
+      if (error) {
+        console.error('Error al obtener notificaciones:', error);
+        return [];
+      }
+      return data || [];
+    } catch (error) {
+      console.error('Error inesperado al obtener notificaciones:', error);
+      return [];
+    }
   }
 
   static async markAsRead(notificationId: string, userId: string) {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ read: true })
-      .eq('id', notificationId)
-      .eq('user_id', userId);
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', notificationId)
+        .eq('user_id', userId);
 
-    if (error) throw error;
+      if (error) {
+        console.error('Error al marcar notificación como leída:', error);
+      }
+    } catch (error) {
+      console.error('Error inesperado al marcar notificación como leída:', error);
+    }
   }
 
   static async sendTelegramNotification(notification: Notification) {
@@ -87,28 +110,35 @@ export class NotificationService {
     appointmentDate: string,
     serviceType: string
   ) {
-    const titles = {
-      appointment_created: 'Nueva Cita Programada',
-      appointment_updated: 'Cita Actualizada',
-      appointment_reminder: 'Recordatorio de Cita',
-    };
+    try {
+      const titles = {
+        appointment_created: 'Nueva Cita Programada',
+        appointment_updated: 'Cita Actualizada',
+        appointment_reminder: 'Recordatorio de Cita',
+      };
 
-    const messages = {
-      appointment_created: `Se ha programado una nueva cita de ${serviceType} para ${new Date(appointmentDate).toLocaleString()}`,
-      appointment_updated: `Tu cita de ${serviceType} ha sido actualizada para ${new Date(appointmentDate).toLocaleString()}`,
-      appointment_reminder: `Recordatorio: Tienes una cita de ${serviceType} mañana a las ${new Date(appointmentDate).toLocaleString()}`,
-    };
+      const messages = {
+        appointment_created: `Se ha programado una nueva cita de ${serviceType} para ${new Date(appointmentDate).toLocaleString()}`,
+        appointment_updated: `Tu cita de ${serviceType} ha sido actualizada para ${new Date(appointmentDate).toLocaleString()}`,
+        appointment_reminder: `Recordatorio: Tienes una cita de ${serviceType} mañana a las ${new Date(appointmentDate).toLocaleString()}`,
+      };
 
-    const notification = await this.createNotification({
-      user_id: userId,
-      title: titles[type],
-      message: messages[type],
-      type,
-    });
+      const notification = await this.createNotification({
+        user_id: userId,
+        title: titles[type],
+        message: messages[type],
+        type,
+      });
 
-    // Intentar enviar por Telegram si está configurado
-    await this.sendTelegramNotification(notification);
+      if (notification) {
+        // Intentar enviar por Telegram si está configurado
+        await this.sendTelegramNotification(notification);
+      }
 
-    return notification;
+      return notification;
+    } catch (error) {
+      console.error('Error al crear notificación de cita:', error);
+      return null;
+    }
   }
 } 
